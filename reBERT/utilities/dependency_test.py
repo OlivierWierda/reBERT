@@ -15,7 +15,7 @@ def parse_pyproject_dependencies() -> Dict[str, str]:
 
     # Look for pyproject.toml in current directory or parent directory
     pyproject_path = None
-    for path in [Path("../../../pyproject.toml"), Path("../../../pyproject.toml")]:
+    for path in [Path("../../pyproject.toml"), Path("../../pyproject.toml")]:
         if path.exists():
             pyproject_path = path
             break
