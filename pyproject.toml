@@ -25,7 +25,6 @@ dependencies = [
 
     # AI/ML packages
     "torch==2.6.0+cu124",              # Latest, has Python 3.13 wheels available + CUDA
-
     "transformers==4.53.0",            # Latest stable, tested on Python 3.9+
     "accelerate==1.2.1",               # Latest stable, required for transformers training
     "datasets==3.2.0",                 # Latest stable, works with above versions
@@ -43,11 +42,11 @@ dependencies = [
     "tqdm==4.67.1",                    # Latest stable progress bars
     "typer==0.15.1",                   # Latest stable CLI framework
     "ruff==0.8.4",                     # Latest stable linter and formatter
+    "rich==14.0.0",                    # Latest stable pretty printing and terminal styling
 
     # Documentation
     "mkdocs==1.6.1",                   # Latest stable documentation generator
 ]
-
 requires-python = ">=3.13.5"
 
 [tool.ruff]

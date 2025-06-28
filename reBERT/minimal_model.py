@@ -19,6 +19,9 @@ class MinimalHierarchicalBERT(nn.Module):
             [HierarchicalTransformerLayer() for _ in range(num_layers)]
         )
 
+        # QA head for SQuAD (add at the end of __init__)
+        self.qa_outputs = nn.Linear(hidden_size, 2)  # 2 outputs: start_logits, end_logits
+
     def forward(self, input_ids, attention_mask=None):
         batch_size, seq_len = input_ids.shape
 
@@ -40,4 +43,13 @@ class MinimalHierarchicalBERT(nn.Module):
         for layer in self.hierarchical_layers:
             hidden_states = layer(hidden_states, attention_mask)
 
-        return hidden_states
+        # QA head
+        qa_logits = self.qa_outputs(hidden_states)  # [batch, seq_len, 2]
+        start_logits = qa_logits[:, :, 0]  # [batch, seq_len]
+        end_logits = qa_logits[:, :, 1]  # [batch, seq_len]
+
+        return {
+            "last_hidden_state": hidden_states,
+            "start_logits": start_logits,
+            "end_logits": end_logits,
+        }
