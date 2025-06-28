@@ -7,7 +7,8 @@ from collections import Counter
 
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, TensorDataset
+
 from datasets import load_dataset
 from transformers import AutoTokenizer
 from tqdm import tqdm
@@ -19,7 +20,10 @@ from rich.panel import Panel
 console = Console()
 
 
-def process_squad_example(example, tokenizer, max_length=128):
+# Configuration
+MAX_SEQUENCE_LENGTH = 512  # Increase from 128 to reduce answer truncation
+
+def process_squad_example(example, tokenizer, max_length=MAX_SEQUENCE_LENGTH):
     """Convert SQuAD example to model inputs with REAL answer positions"""
 
     question = example["question"]
@@ -28,6 +32,12 @@ def process_squad_example(example, tokenizer, max_length=128):
     answer_start_char = (
         example["answers"]["answer_start"][0] if example["answers"]["answer_start"] else 0
     )
+    # Check if answer is truncated
+    input_text = question + " " + context
+    if answer_start_char >= len(input_text):
+        console.print(
+            f"⚠️  Answer truncated: char {answer_start_char} >= text len {len(input_text)}"
+        )
 
     # Tokenize with offset mapping to track character-to-token alignment
     inputs = tokenizer(
@@ -69,6 +79,11 @@ def process_squad_example(example, tokenizer, max_length=128):
         if answer_end_token < answer_start_token:
             answer_end_token = answer_start_token
 
+        # Debug failing cases
+        if answer_start_token == 0 and answer_end_token == 0 and answer_text:
+            console.print(f"⚠️  Failed to find: '{answer_text}' at char {answer_start_char}")
+            console.print(f"    Context: '{context[:100]}...'")
+
     # Remove offset_mapping from inputs (model doesn't need it)
     inputs.pop("offset_mapping")
 
@@ -92,7 +107,7 @@ def test_data_processing():
     tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
     example = dataset[0]
-    processed = process_squad_example(example, tokenizer)
+    processed = process_squad_example(example, tokenizer, max_length=MAX_SEQUENCE_LENGTH)
 
     console.print(f"✅ Input IDs shape: {processed['input_ids'].shape}")
     console.print(f"✅ Start position: {processed['start_positions'].item()}")
@@ -110,12 +125,14 @@ def test_improved_processing():
     dataset = load_dataset("squad", split="train[:20]")
     tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
+
+
     for i, example in enumerate(dataset):
         console.print(f"\n[bold]Example {i+1}:[/bold]")
         console.print(f"Question: [italic]{example['question']}[/italic]")
         console.print(f"Answer: [green]{example['answers']['text'][0]}[/green]")
 
-        processed = process_squad_example(example, tokenizer)
+        processed = process_squad_example(example, tokenizer, max_length=MAX_SEQUENCE_LENGTH)
 
         start_pos = processed["start_positions"].item()
         end_pos = processed["end_positions"].item()
@@ -134,50 +151,70 @@ def test_improved_processing():
 
 
 
-def simple_training_test():
+def simple_training_test(num_examples=1000, num_epochs=25, learning_rate=5e-5, num_layers=2):
     """Test basic training loop with SQuAD data"""
 
-    console.print(Panel("🏋️ Testing Training Loop", style="bold green"))
+    console.print(Panel(f"🏋️ Training Loop: {num_examples} examples, {num_epochs} epochs", style="bold green"))
 
-    # Load small dataset
-    dataset = load_dataset("squad", split="train[:1000]")  # Just 10 examples
+    # Load dataset
+    dataset = load_dataset("squad", split=f"train[:{num_examples}]")
     tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
     # Process all examples
     processed_data = []
     for example in dataset:
-        processed = process_squad_example(example, tokenizer)
+        processed = process_squad_example(example, tokenizer, max_length=MAX_SEQUENCE_LENGTH)
         processed_data.append(processed)
 
     console.print(f"📚 Processed {len(processed_data)} examples")
 
+    console.print(f"🔍 First 3 training examples:")
+    for i in range(min(3, len(processed_data))):
+        console.print(
+            f"   Ex {i+1}: start={processed_data[i]['start_positions'].item()}, end={processed_data[i]['end_positions'].item()}, answer='{processed_data[i]['answer_text']}'"
+        )
+
+    # Create batched dataset
+    input_ids = torch.stack([data["input_ids"] for data in processed_data])
+    attention_masks = torch.stack([data["attention_mask"] for data in processed_data])
+    start_positions = torch.stack([data["start_positions"] for data in processed_data])
+    end_positions = torch.stack([data["end_positions"] for data in processed_data])
+
+    dataset = TensorDataset(input_ids, attention_masks, start_positions, end_positions)
+    dataloader = DataLoader(dataset, batch_size=8, shuffle=True)
+
+    console.print(f"🚀 Created DataLoader: batch_size=8, {len(dataloader)} batches per epoch")
+
     # Create model and optimizer
-    model = MinimalHierarchicalBERT(num_layers=2)
+    model = MinimalHierarchicalBERT(num_layers=num_layers)
     model.train()
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=5e-5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
-    console.print("🚀 Starting training...")
+    console.print(f"🚀 Starting training: {num_epochs} epochs, LR={learning_rate}")
 
-    # Simple training loop
-    for epoch in range(25):
+    # Training loop
+    for epoch in range(num_epochs):
         total_loss = 0
+        num_batches = 0
 
-        for i, data in enumerate(processed_data):
+        for batch in dataloader:
+            input_ids_batch, attention_mask_batch, start_pos_batch, end_pos_batch = batch
+
             optimizer.zero_grad()
 
             # Forward pass
             outputs = model(
-                input_ids=data["input_ids"].unsqueeze(0),  # Add batch dim
-                attention_mask=data["attention_mask"].unsqueeze(0),
+                input_ids=input_ids_batch,
+                attention_mask=attention_mask_batch,
             )
 
             # Calculate loss
             start_logits = outputs["start_logits"]
             end_logits = outputs["end_logits"]
 
-            start_loss = nn.CrossEntropyLoss()(start_logits, data["start_positions"].unsqueeze(0))
-            end_loss = nn.CrossEntropyLoss()(end_logits, data["end_positions"].unsqueeze(0))
+            start_loss = nn.CrossEntropyLoss()(start_logits, start_pos_batch)
+            end_loss = nn.CrossEntropyLoss()(end_logits, end_pos_batch)
             loss = start_loss + end_loss
 
             # Backward pass
@@ -185,12 +222,48 @@ def simple_training_test():
             optimizer.step()
 
             total_loss += loss.item()
+            num_batches += 1
 
-        avg_loss = total_loss / len(processed_data)
+        avg_loss = total_loss / num_batches
         console.print(f"📈 Epoch {epoch + 1}: Average Loss = {avg_loss:.4f}")
 
     console.print("✅ Training test complete!")
+
+    # Save the trained model
+    model_filename = f"trained_hierarchical_bert_{num_examples}ex_{num_epochs}ep.pth"
+    console.print(f"💾 Saving trained model as '{model_filename}'...")
+    torch.save(model.state_dict(), model_filename)
+    console.print("✅ Model saved!")
+
     return model
+
+
+def run_training_experiment(
+    train_examples=1000, train_epochs=25, eval_examples=20, learning_rate=5e-5
+):
+    """Run complete training and evaluation experiment"""
+
+    console.print(
+        Panel(
+            f"🧪 Training Experiment: {train_examples} train, {train_epochs} epochs, eval on {eval_examples}",
+            style="bold cyan",
+        )
+    )
+
+    # Training
+    trained_model = simple_training_test(
+        num_examples=train_examples, num_epochs=train_epochs, learning_rate=learning_rate
+    )
+
+    console.print("\n" + "=" * 60 + "\n")
+
+    # Evaluation
+    dataset = load_dataset("squad", split=f"validation[:{eval_examples}]")
+    tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
+
+    results = evaluate_model(trained_model, dataset, tokenizer, max_examples=eval_examples)
+
+    return trained_model, results
 
 
 def normalize_answer(s):
@@ -248,103 +321,116 @@ def evaluate_model(model, dataset, tokenizer, max_examples=20):
     exact_matches = []
     f1_scores = []
 
-    # Debug: Check dataset structure
-    console.print(f"🔍 Dataset type: {type(dataset)}")
-    console.print(f"🔍 Dataset length: {len(dataset)}")
-    console.print(f"🔍 First example type: {type(dataset[0])}")
-    console.print(
-        f"🔍 First example keys: {list(dataset[0].keys()) if hasattr(dataset[0], 'keys') else 'No keys'}"
-    )
-
     console.print(f"🧪 Evaluating on {min(max_examples, len(dataset))} examples...")
 
     with torch.no_grad():
         for i in range(min(max_examples, len(dataset))):
             example = dataset[i]
 
-            # Debug: Print example structure
-            if i == 0:
-                console.print(f"🔍 Example structure: {type(example)}")
-                if hasattr(example, "keys"):
-                    console.print(f"🔍 Example keys: {list(example.keys())}")
-
             # Process example
-            try:
-                processed = process_squad_example(example, tokenizer)
+            processed = process_squad_example(example, tokenizer, max_length=MAX_SEQUENCE_LENGTH)
 
-                # Get model prediction
-                outputs = model(
-                    input_ids=processed["input_ids"].unsqueeze(0),
-                    attention_mask=processed["attention_mask"].unsqueeze(0),
+            # Get model prediction
+            outputs = model(
+                input_ids=processed["input_ids"].unsqueeze(0),
+                attention_mask=processed["attention_mask"].unsqueeze(0),
+            )
+
+            # Find predicted answer span
+            start_logits = outputs["start_logits"][0]  # Remove batch dim
+            end_logits = outputs["end_logits"][0]
+
+            pred_start = torch.argmax(start_logits).item()
+            pred_end = torch.argmax(end_logits).item()
+
+            # DEBUG: Show what's happening
+            if i < 3:
+                console.print(f"\n🔍 [bold]Debug Example {i+1}:[/bold]")
+                console.print(f"   Predicted start: {pred_start}, end: {pred_end}")
+
+                # Show top predictions
+                start_top3 = torch.topk(start_logits, 3)
+                end_top3 = torch.topk(end_logits, 3)
+                console.print(
+                    f"   Start top 3: positions {start_top3.indices.tolist()}, scores {start_top3.values.tolist()}"
+                )
+                console.print(
+                    f"   End top 3: positions {end_top3.indices.tolist()}, scores {end_top3.values.tolist()}"
                 )
 
-                # Find predicted answer span
-                start_logits = outputs["start_logits"][0]  # Remove batch dim
-                end_logits = outputs["end_logits"][0]
+                # Show tokens around prediction
+                all_tokens = tokenizer.convert_ids_to_tokens(processed["input_ids"])
+                console.print(f"   Sequence length: {len(all_tokens)}")
+                console.print(
+                    f"   Token at start pos: '{all_tokens[pred_start]}' (pos {pred_start})"
+                )
+                console.print(f"   Token at end pos: '{all_tokens[pred_end]}' (pos {pred_end})")
 
-                pred_start = torch.argmax(start_logits).item()
-                pred_end = torch.argmax(end_logits).item()
+            # Ensure valid span
+            if pred_end < pred_start:
+                pred_end = pred_start
 
-                # Ensure valid span
-                if pred_end < pred_start:
-                    pred_end = pred_start
-
-                # Extract predicted text
+            # Extract predicted text - be more careful
+            if pred_start < len(processed["input_ids"]) and pred_end < len(processed["input_ids"]):
                 pred_tokens = processed["input_ids"][pred_start : pred_end + 1]
-                predicted_answer = tokenizer.decode(pred_tokens, skip_special_tokens=True)
+                predicted_answer = tokenizer.decode(pred_tokens, skip_special_tokens=True).strip()
+            else:
+                predicted_answer = ""
 
-                # Ground truth answer
-                ground_truth = example["answers"]["text"][0] if example["answers"]["text"] else ""
+            # Ground truth answer
+            ground_truth = example["answers"]["text"][0] if example["answers"]["text"] else ""
 
-                # Calculate metrics
-                em = compute_exact_match(predicted_answer, ground_truth)
-                f1 = compute_f1(predicted_answer, ground_truth)
+            # DEBUG: Show the comparison
+            if i < 3:
+                console.print(f"   Ground truth: '{ground_truth}'")
+                console.print(f"   Predicted: '{predicted_answer}'")
+                console.print(f"   Prediction empty: {len(predicted_answer) == 0}")
 
-                exact_matches.append(em)
-                f1_scores.append(f1)
+            # Calculate metrics
+            em = compute_exact_match(predicted_answer, ground_truth)
+            f1 = compute_f1(predicted_answer, ground_truth)
 
-                # Show first few examples
-                if i < 3:
-                    console.print(f"\n[bold]Example {i+1}:[/bold]")
-                    console.print(f"Question: [italic]{example['question'][:80]}...[/italic]")
-                    console.print(f"Ground Truth: [green]{ground_truth}[/green]")
-                    console.print(f"Predicted: [yellow]{predicted_answer}[/yellow]")
-                    console.print(f"EM: [cyan]{em}[/cyan], F1: [cyan]{f1:.3f}[/cyan]")
+            exact_matches.append(em)
+            f1_scores.append(f1)
 
-            except Exception as e:
-                console.print(f"❌ Error processing example {i}: {e}")
-                continue
+            # Show first few examples
+            if i < 3:
+                console.print(f"Question: [italic]{example['question'][:80]}...[/italic]")
+                console.print(f"Ground Truth: [green]{ground_truth}[/green]")
+                console.print(f"Predicted: [yellow]{predicted_answer}[/yellow]")
+                console.print(f"EM: [cyan]{em}[/cyan], F1: [cyan]{f1:.3f}[/cyan]")
 
-    if exact_matches:  # Only calculate if we have results
+    # Overall metrics
+    if exact_matches:
         exact_match_score = sum(exact_matches) / len(exact_matches) * 100
         f1_score = sum(f1_scores) / len(f1_scores) * 100
 
         console.print(f"\n🏆 [bold]Final Results:[/bold]")
         console.print(f"   📍 Exact Match: [bold green]{exact_match_score:.1f}%[/bold green]")
         console.print(f"   🎯 F1 Score: [bold blue]{f1_score:.1f}%[/bold blue]")
+
+        return {
+            "exact_match": exact_match_score,
+            "f1": f1_score,
+            "individual_em": exact_matches,
+            "individual_f1": f1_scores,
+        }
     else:
         console.print("❌ No successful evaluations")
+        return {"exact_match": 0, "f1": 0}
 
-    return {
-        'exact_match': exact_match_score if exact_matches else 0,
-        'f1': f1_score if exact_matches else 0,
-        'individual_em': exact_matches,
-        'individual_f1': f1_scores
-    }
 
 if __name__ == "__main__":
-    # Skip small tests when doing serious training
-    # test_data_processing()
-    # console.print("\n" + "=" * 60 + "\n")
+    # Easy configuration - change these parameters to experiment!
 
-    trained_model = simple_training_test()  # This is the main training
-    console.print("\n" + "=" * 60 + "\n")
+    # Quick test (SUPAfast)
+    # run_training_experiment(train_examples=25, train_epochs=10, eval_examples=25, learning_rate=5e-5)
 
-    # test_improved_processing()  # Skip this too
-    # console.print("\n" + "="*60 + "\n")
+    # Quick test (fast)
+    # run_training_experiment(train_examples=100, train_epochs=25, eval_examples=25, learning_rate=5e-5)
 
-    # Keep the evaluation to see results
-    dataset = load_dataset("squad", split="validation[:20]")
-    tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
+    # Medium experiment (current)
+    run_training_experiment(train_examples=1000, train_epochs=50, eval_examples=100, learning_rate=5e-5)
 
-    results = evaluate_model(trained_model, dataset, tokenizer, max_examples=20)
+    # Large experiment (uncomment for serious training)
+    # run_training_experiment(train_examples=5000, train_epochs=50, eval_examples=100, learning_rate=3e-5)

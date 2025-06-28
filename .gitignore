@@ -184,3 +184,5 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+reBERT/trained_hierarchical_bert_25ex_10ep.pth
+*.pth

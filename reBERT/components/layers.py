@@ -15,6 +15,10 @@ class HierarchicalTransformerLayer(torch.nn.Module):
         self.transformer_B2 = create_192d_transformer()
 
     def forward(self, hidden_states, attention_mask=None):
+        # Fix attention mask for batching
+        if attention_mask is not None and attention_mask.dim() == 2:
+            attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+
         # Split 768D → 4x192D
         branch_A, branch_B = split_768_to_384(hidden_states)
         sub_A1, sub_A2 = split_384_to_192(branch_A)
