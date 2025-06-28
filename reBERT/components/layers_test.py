@@ -3,8 +3,7 @@ Test functions for hierarchical BERT components
 """
 
 import torch
-from layers import split_768_to_384, split_384_to_192, create_192d_transformer, process_all_192d_branches
-
+from layers import split_768_to_384, split_384_to_192, create_192d_transformer, process_all_192d_branches, concatenate_branches_to_768d, HierarchicalTransformerLayer
 
 def test_dimension_splitting():
     """Test that our splitting functions work correctly"""
@@ -82,9 +81,62 @@ def test_process_all_branches():
     return processed_A1, processed_A2, processed_B1, processed_B2
 
 
+def test_concatenate_to_768d():
+    """Test concatenating 4x192D branches back to 768D"""
+
+    # Create dummy input and process through full pipeline
+    dummy_input = torch.randn(2, 10, 768)
+    print(f"Original input shape: {dummy_input.shape}")
+
+    # Split into branches
+    branch_A, branch_B = split_768_to_384(dummy_input)
+    sub_A1, sub_A2 = split_384_to_192(branch_A)
+    sub_B1, sub_B2 = split_384_to_192(branch_B)
+
+    # Process all branches
+    with torch.no_grad():
+        processed_A1, processed_A2, processed_B1, processed_B2 = process_all_192d_branches(
+            sub_A1, sub_A2, sub_B1, sub_B2
+        )
+
+    # Concatenate back to 768D
+    reconstructed = concatenate_branches_to_768d(
+        processed_A1, processed_A2, processed_B1, processed_B2
+    )
+
+    print(f"Reconstructed shape: {reconstructed.shape}")
+    print(f"Same shape as input: {reconstructed.shape == dummy_input.shape}")
+
+    return reconstructed
+
+
+def test_hierarchical_layer():
+    """Test the complete HierarchicalTransformerLayer class"""
+
+    # Create dummy input
+    dummy_input = torch.randn(2, 10, 768)
+    print(f"Input shape: {dummy_input.shape}")
+
+    # Create hierarchical layer
+    hierarchical_layer = HierarchicalTransformerLayer()
+    print(f"Layer created: {type(hierarchical_layer)}")
+
+    # Forward pass
+    with torch.no_grad():
+        output = hierarchical_layer(dummy_input)
+
+    print(f"Output shape: {output.shape}")
+    print(f"Input/output same shape: {output.shape == dummy_input.shape}")
+
+    return output
+
 if __name__ == "__main__":
     test_dimension_splitting()
     print("\n" + "="*50 + "\n")
     test_192d_transformer()
     print("\n" + "="*50 + "\n")
     test_process_all_branches()
+    print("\n" + "="*50 + "\n")
+    test_concatenate_to_768d()
+    print("\n" + "="*50 + "\n")
+    test_hierarchical_layer()

@@ -1,5 +1,37 @@
 from transformers import BertConfig
 from transformers.models.bert.modeling_bert import BertLayer
+import torch
+
+
+class HierarchicalTransformerLayer(torch.nn.Module):
+    """Complete hierarchical transformer layer: 768D → 4x192D → process → 768D"""
+
+    def __init__(self):
+        super().__init__()
+        # Create persistent transformer layers for each branch
+        self.transformer_A1 = create_192d_transformer()
+        self.transformer_A2 = create_192d_transformer()
+        self.transformer_B1 = create_192d_transformer()
+        self.transformer_B2 = create_192d_transformer()
+
+    def forward(self, hidden_states, attention_mask=None):
+        # Split 768D → 4x192D
+        branch_A, branch_B = split_768_to_384(hidden_states)
+        sub_A1, sub_A2 = split_384_to_192(branch_A)
+        sub_B1, sub_B2 = split_384_to_192(branch_B)
+
+        # Process each branch
+        processed_A1 = self.transformer_A1(sub_A1, attention_mask)[0]
+        processed_A2 = self.transformer_A2(sub_A2, attention_mask)[0]
+        processed_B1 = self.transformer_B1(sub_B1, attention_mask)[0]
+        processed_B2 = self.transformer_B2(sub_B2, attention_mask)[0]
+
+        # Concatenate back to 768D
+        reconstructed_output = concatenate_branches_to_768d(
+            processed_A1, processed_A2, processed_B1, processed_B2
+        )
+
+        return reconstructed_output
 
 
 def split_768_to_384(hidden_states):
@@ -69,3 +101,19 @@ def process_all_192d_branches(sub_A1, sub_A2, sub_B1, sub_B2, attention_mask=Non
     processed_B2 = transformer_B2(sub_B2, attention_mask)[0]
 
     return processed_A1, processed_A2, processed_B1, processed_B2
+
+
+def concatenate_branches_to_768d(processed_A1, processed_A2, processed_B1, processed_B2):
+    """
+    Concatenate 4x192D branches back to 1x768D
+
+    Args:
+        processed_A1, processed_A2, processed_B1, processed_B2: tensors of shape (batch_size, seq_len, 192)
+
+    Returns:
+        concatenated: tensor of shape (batch_size, seq_len, 768)
+    """
+    # Concatenate along the last dimension (feature dimension)
+    concatenated = torch.cat([processed_A1, processed_A2, processed_B1, processed_B2], dim=-1)
+
+    return concatenated
