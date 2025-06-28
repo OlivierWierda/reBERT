@@ -1,0 +1,80 @@
+{
+  "timestamp": "2025-06-28T03:54:38.124420",
+  "device": "cuda",
+  "models_tested": [
+    "BERT",
+    "ModernBERT"
+  ],
+  "architecture_comparison": {
+    "total_parameters": {
+      "BERT": 109482240,
+      "ModernBERT": 149014272
+    },
+    "trainable_parameters": {
+      "BERT": 109482240,
+      "ModernBERT": 149014272
+    },
+    "hidden_size": {
+      "BERT": 768,
+      "ModernBERT": 768
+    },
+    "num_layers": {
+      "BERT": 12,
+      "ModernBERT": 22
+    },
+    "num_attention_heads": {
+      "BERT": 12,
+      "ModernBERT": 12
+    },
+    "intermediate_size": {
+      "BERT": 3072,
+      "ModernBERT": 1152
+    },
+    "max_position_embeddings": {
+      "BERT": 512,
+      "ModernBERT": 8192
+    },
+    "vocab_size": {
+      "BERT": 30522,
+      "ModernBERT": 50368
+    }
+  },
+  "performance_benchmark": {
+    "model_name": {
+      "0": "BERT",
+      "1": "ModernBERT"
+    },
+    "avg_time": {
+      "0": 0.06001391410827637,
+      "1": 0.05832729339599609
+    },
+    "std_time": {
+      "0": 0.031667130226949655,
+      "1": 0.0014740686392165163
+    },
+    "avg_memory": {
+      "0": 0.1824768,
+      "1": 0.3352576
+    },
+    "texts_processed": {
+      "0": 4,
+      "1": 4
+    },
+    "time_per_text": {
+      "0": 0.015003478527069092,
+      "1": 0.014581823348999023
+    }
+  },
+  "test_samples": [
+    "Reading comprehension requires understanding context and relationships between concepts.",
+    "The hierarchical structure of transformer models enables multi-level feature extraction and processing.",
+    "Curriculum learning strategies can significantly improve model training efficiency by presenting examples in order of increasing difficulty.",
+    "Modern neural networks benefit from architectural innovations that balance computational efficiency with representational capacity."
+  ],
+  "research_validation": {
+    "modernbert_available": true,
+    "bert_available": true,
+    "baseline_valid": true,
+    "hierarchy_feasible": true
+  }
+}

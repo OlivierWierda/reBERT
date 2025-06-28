@@ -1,0 +1,64 @@
+[build-system]
+requires = ["flit_core >=3.2,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "reBERT"
+version = "0.0.1"
+description = "Investigating the effects of hierarchical binary tree dimension reduction for reading comprehension."
+authors = [
+  { name = "Olivier Wierda" },
+]
+license = { file = "LICENSE" }
+readme = "README.md"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License"
+]
+dependencies = [
+    # Core data science packages
+    "numpy==2.3.0",                    # Latest, supports Python 3.11-3.13
+    "pandas==2.2.3",                   # First version compatible with Python 3.13
+    "matplotlib==3.9.4",               # Latest stable, follows NEP 29 policy
+    "seaborn==0.13.2",                 # Latest stable, supports Python 3.8+
+    "scikit-learn==1.6.0",             # Latest stable, Python 3.9+ compatible
+
+    # AI/ML packages
+    "torch==2.6.0+cu124",              # Latest, has Python 3.13 wheels available + CUDA
+
+    "transformers==4.53.0",            # Latest stable, tested on Python 3.9+
+    "accelerate==1.2.1",               # Latest stable, required for transformers training
+    "datasets==3.2.0",                 # Latest stable, works with above versions
+
+    # Development and notebook environment
+    "ipython==8.30.0",                 # Latest stable interactive Python shell
+    "ipywidgets==8.1.7",               # Interactive widgets for Jupyter
+    "huggingface_hub[hf_xet]==0.33.1", # Faster model downloads from HF Hub
+    "jupyterlab==4.3.3",               # Latest stable Jupyter environment
+    "notebook==7.3.1",                 # Latest stable classic notebook interface
+
+    # Utilities and tools
+    "loguru==0.7.3",                   # Latest stable logging library
+    "python-dotenv==1.0.1",            # Latest stable environment variables
+    "tqdm==4.67.1",                    # Latest stable progress bars
+    "typer==0.15.1",                   # Latest stable CLI framework
+    "ruff==0.8.4",                     # Latest stable linter and formatter
+
+    # Documentation
+    "mkdocs==1.6.1",                   # Latest stable documentation generator
+]
+
+requires-python = ">=3.13.5"
+
+[tool.ruff]
+line-length = 99
+src = ["reBERT"]
+include = ["pyproject.toml", "reBERT/**/*.py"]
+
+[tool.ruff.lint]
+extend-select = ["I"]  # Add import sorting
+
+[tool.ruff.lint.isort]
+known-first-party = ["reBERT"]
+force-sort-within-sections = true
+
