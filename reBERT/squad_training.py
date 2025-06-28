@@ -88,7 +88,7 @@ def test_data_processing():
     console.print(Panel("🔧 Testing Data Processing", style="bold blue"))
 
     # Load one example
-    dataset = load_dataset("squad", split="train[:5]")
+    dataset = load_dataset("squad", split="train[:1000]")
     tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
     example = dataset[0]
@@ -107,7 +107,7 @@ def test_improved_processing():
     console.print(Panel("🎯 Testing Improved Answer Detection", style="bold cyan"))
 
     # Load examples
-    dataset = load_dataset("squad", split="train[:3]")
+    dataset = load_dataset("squad", split="train[:20]")
     tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
     for i, example in enumerate(dataset):
@@ -140,7 +140,7 @@ def simple_training_test():
     console.print(Panel("🏋️ Testing Training Loop", style="bold green"))
 
     # Load small dataset
-    dataset = load_dataset("squad", split="train[:10]")  # Just 10 examples
+    dataset = load_dataset("squad", split="train[:1000]")  # Just 10 examples
     tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
     # Process all examples
@@ -160,7 +160,7 @@ def simple_training_test():
     console.print("🚀 Starting training...")
 
     # Simple training loop
-    for epoch in range(3):
+    for epoch in range(25):
         total_loss = 0
 
         for i, data in enumerate(processed_data):
@@ -248,80 +248,103 @@ def evaluate_model(model, dataset, tokenizer, max_examples=20):
     exact_matches = []
     f1_scores = []
 
+    # Debug: Check dataset structure
+    console.print(f"🔍 Dataset type: {type(dataset)}")
+    console.print(f"🔍 Dataset length: {len(dataset)}")
+    console.print(f"🔍 First example type: {type(dataset[0])}")
+    console.print(
+        f"🔍 First example keys: {list(dataset[0].keys()) if hasattr(dataset[0], 'keys') else 'No keys'}"
+    )
+
     console.print(f"🧪 Evaluating on {min(max_examples, len(dataset))} examples...")
 
     with torch.no_grad():
-        for i, example in enumerate(dataset[:max_examples]):
+        for i in range(min(max_examples, len(dataset))):
+            example = dataset[i]
+
+            # Debug: Print example structure
+            if i == 0:
+                console.print(f"🔍 Example structure: {type(example)}")
+                if hasattr(example, "keys"):
+                    console.print(f"🔍 Example keys: {list(example.keys())}")
+
             # Process example
-            processed = process_squad_example(example, tokenizer)
+            try:
+                processed = process_squad_example(example, tokenizer)
 
-            # Get model prediction
-            outputs = model(
-                input_ids=processed["input_ids"].unsqueeze(0),
-                attention_mask=processed["attention_mask"].unsqueeze(0),
-            )
+                # Get model prediction
+                outputs = model(
+                    input_ids=processed["input_ids"].unsqueeze(0),
+                    attention_mask=processed["attention_mask"].unsqueeze(0),
+                )
 
-            # Find predicted answer span
-            start_logits = outputs["start_logits"][0]  # Remove batch dim
-            end_logits = outputs["end_logits"][0]
+                # Find predicted answer span
+                start_logits = outputs["start_logits"][0]  # Remove batch dim
+                end_logits = outputs["end_logits"][0]
 
-            pred_start = torch.argmax(start_logits).item()
-            pred_end = torch.argmax(end_logits).item()
+                pred_start = torch.argmax(start_logits).item()
+                pred_end = torch.argmax(end_logits).item()
 
-            # Ensure valid span
-            if pred_end < pred_start:
-                pred_end = pred_start
+                # Ensure valid span
+                if pred_end < pred_start:
+                    pred_end = pred_start
 
-            # Extract predicted text
-            pred_tokens = processed["input_ids"][pred_start : pred_end + 1]
-            predicted_answer = tokenizer.decode(pred_tokens, skip_special_tokens=True)
+                # Extract predicted text
+                pred_tokens = processed["input_ids"][pred_start : pred_end + 1]
+                predicted_answer = tokenizer.decode(pred_tokens, skip_special_tokens=True)
 
-            # Ground truth answer
-            ground_truth = example["answers"]["text"][0] if example["answers"]["text"] else ""
+                # Ground truth answer
+                ground_truth = example["answers"]["text"][0] if example["answers"]["text"] else ""
 
-            # Calculate metrics
-            em = compute_exact_match(predicted_answer, ground_truth)
-            f1 = compute_f1(predicted_answer, ground_truth)
+                # Calculate metrics
+                em = compute_exact_match(predicted_answer, ground_truth)
+                f1 = compute_f1(predicted_answer, ground_truth)
 
-            exact_matches.append(em)
-            f1_scores.append(f1)
+                exact_matches.append(em)
+                f1_scores.append(f1)
 
-            # Show first few examples
-            if i < 3:
-                console.print(f"\n[bold]Example {i+1}:[/bold]")
-                console.print(f"Question: [italic]{example['question'][:80]}...[/italic]")
-                console.print(f"Ground Truth: [green]{ground_truth}[/green]")
-                console.print(f"Predicted: [yellow]{predicted_answer}[/yellow]")
-                console.print(f"EM: [cyan]{em}[/cyan], F1: [cyan]{f1:.3f}[/cyan]")
+                # Show first few examples
+                if i < 3:
+                    console.print(f"\n[bold]Example {i+1}:[/bold]")
+                    console.print(f"Question: [italic]{example['question'][:80]}...[/italic]")
+                    console.print(f"Ground Truth: [green]{ground_truth}[/green]")
+                    console.print(f"Predicted: [yellow]{predicted_answer}[/yellow]")
+                    console.print(f"EM: [cyan]{em}[/cyan], F1: [cyan]{f1:.3f}[/cyan]")
 
-    # Overall metrics
-    exact_match_score = sum(exact_matches) / len(exact_matches) * 100
-    f1_score = sum(f1_scores) / len(f1_scores) * 100
+            except Exception as e:
+                console.print(f"❌ Error processing example {i}: {e}")
+                continue
 
-    console.print(f"\n🏆 [bold]Final Results:[/bold]")
-    console.print(f"   📍 Exact Match: [bold green]{exact_match_score:.1f}%[/bold green]")
-    console.print(f"   🎯 F1 Score: [bold blue]{f1_score:.1f}%[/bold blue]")
+    if exact_matches:  # Only calculate if we have results
+        exact_match_score = sum(exact_matches) / len(exact_matches) * 100
+        f1_score = sum(f1_scores) / len(f1_scores) * 100
+
+        console.print(f"\n🏆 [bold]Final Results:[/bold]")
+        console.print(f"   📍 Exact Match: [bold green]{exact_match_score:.1f}%[/bold green]")
+        console.print(f"   🎯 F1 Score: [bold blue]{f1_score:.1f}%[/bold blue]")
+    else:
+        console.print("❌ No successful evaluations")
 
     return {
-        "exact_match": exact_match_score,
-        "f1": f1_score,
-        "individual_em": exact_matches,
-        "individual_f1": f1_scores,
+        'exact_match': exact_match_score if exact_matches else 0,
+        'f1': f1_score if exact_matches else 0,
+        'individual_em': exact_matches,
+        'individual_f1': f1_scores
     }
 
-
 if __name__ == "__main__":
-    test_data_processing()
+    # Skip small tests when doing serious training
+    # test_data_processing()
+    # console.print("\n" + "=" * 60 + "\n")
+
+    trained_model = simple_training_test()  # This is the main training
     console.print("\n" + "=" * 60 + "\n")
 
-    trained_model = simple_training_test()
-    console.print("\n" + "=" * 60 + "\n")
+    # test_improved_processing()  # Skip this too
+    # console.print("\n" + "="*60 + "\n")
 
-    test_improved_processing()
-    console.print("\n" + "="*60 + "\n")
-
-    # Evaluate the trained model
-    dataset = load_dataset("squad", split="validation[:20]")  # Use validation set
+    # Keep the evaluation to see results
+    dataset = load_dataset("squad", split="validation[:20]")
     tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
 
     results = evaluate_model(trained_model, dataset, tokenizer, max_examples=20)
